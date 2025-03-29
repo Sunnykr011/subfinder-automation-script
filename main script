@@ -1,0 +1,22 @@
+#!/bin/bash
+
+read -p "Enter Target Domain: " domain
+echo "🔍 Finding Subdomains for $domain..."
+subfinder -d $domain -o subs.txt
+
+echo "🕵️ Finding Sub-Subdomains..."
+cat subs.txt | subfinder -dL - | anew sub_subs.txt
+
+echo "🚀 Extracting Active URLs..."
+cat sub_subs.txt | httpx -silent | anew live_subs.txt
+
+echo "🌍 Extracting URLs from Wayback, CommonCrawl, and Archive..."
+cat live_subs.txt | gau | tee urls.txt
+
+echo "🕷️ Crawling for More Hidden Endpoints..."
+gospider -S live_subs.txt -o crawl_output -d 2 -t 10 --js -q
+
+echo "⚡ Running FFUF for Directory BruteForce on Live Domains..."
+cat live_subs.txt | ffuf -c -w /usr/share/seclists/Discovery/Web-Content/common.txt -u FUZZ | tee ffuf_results.txt
+
+echo "✅ Scan Complete! Check subs.txt, live_subs.txt, urls.txt, and ffuf_results.txt"
