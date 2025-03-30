@@ -1,22 +1,58 @@
 #!/bin/bash
 
 read -p "Enter Target Domain: " domain
-echo "🔍 Finding Subdomains for $domain..."
-subfinder -d $domain -o subs.txt
+echo -e "\n🔍 Starting Scan for: \e[1;32m$domain\e[0m\n"
 
-echo "🕵️ Finding Sub-Subdomains..."
-cat subs.txt | subfinder -dL - | anew sub_subs.txt
+# Function to show real-time progress
+progress() {
+    pid=$1
+    spin='-\|/'
+    i=0
+    while kill -0 $pid 2>/dev/null; do
+        i=$(( (i+1) %4 ))
+        echo -ne "\r🔄 Running: ${spin:$i:1}"
+        sleep 0.1
+    done
+    echo -ne "\r✅ Done!           \n"
+}
 
-echo "🚀 Extracting Active URLs..."
-cat sub_subs.txt | httpx -silent | anew live_subs.txt
+# Function to run commands safely with logging
+run_cmd() {
+    "$@" 2>>error.log &  # Run in background & log errors
+    pid=$!
+    progress $pid  # Show progress animation
+}
 
-echo "🌍 Extracting URLs from Wayback, CommonCrawl, and Archive..."
-cat live_subs.txt | gau | tee urls.txt
+# Step 1: Subdomain Enumeration
+echo "🔎 Finding Subdomains..."
+run_cmd subfinder -d "$domain" -o subs.txt
+run_cmd subfinder -dL subs.txt -o sub_subs.txt
+wait
 
-echo "🕷️ Crawling for More Hidden Endpoints..."
-gospider -S live_subs.txt -o crawl_output -d 2 -t 10 --js -q
+# Step 2: Extract only live subdomains
+echo "🌍 Checking Live Subdomains..."
+run_cmd httpx -silent < sub_subs.txt | tee live_subs.txt
+rm subs.txt sub_subs.txt  # Remove old files
+wait
 
-echo "⚡ Running FFUF for Directory BruteForce on Live Domains..."
-cat live_subs.txt | ffuf -c -w /usr/share/seclists/Discovery/Web-Content/common.txt -u FUZZ | tee ffuf_results.txt
+# Step 3: Extract URLs from archive sources
+echo "📂 Collecting URLs from Archives..."
+run_cmd gau < live_subs.txt | tee urls.txt
+wait
 
-echo "✅ Scan Complete! Check subs.txt, live_subs.txt, urls.txt, and ffuf_results.txt"
+# Step 4: Crawling for More Hidden Endpoints
+echo "🕷 Deep Crawling for Hidden Paths..."
+run_cmd gospider -S live_subs.txt -o crawl_output -d 2 -t 10 --js -q
+wait
+
+# Final Summary
+echo -e "\n🚀 \e[1;32mScan Complete!\e[0m"
+echo "📄 Live Subdomains: live_subs.txt"
+echo "🌐 Extracted URLs: urls.txt"
+
+# Display errors if any
+if [ -s error.log ]; then
+    echo "⚠️ \e[1;31mSome errors occurred. Check error.log for details.\e[0m"
+else
+    rm error.log  # No errors? Clean up
+fi
